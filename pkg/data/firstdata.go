@@ -17,12 +17,11 @@ type firstData struct {
 
 func GetFirstData(roomID int) []byte {
 	p := &firstData{
-		Uid:       0,
-		Roomid:    roomID,
-		Protover:  2,
-		Platform:  "web",
-		Clientver: "1.14.3",
-		Type:      2,
+		Uid:      0,
+		Roomid:   roomID,
+		Protover: 3,
+		Platform: "web",
+		Type:     2,
 	}
 	d, err := json.Marshal(p)
 	if err != nil {
@@ -31,10 +30,3 @@ func GetFirstData(roomID int) []byte {
 	}
 	return d
 }
-
-// 00 00 00 14 00 10 00 01
-// 00 00 00 03 00 00 00 00
-// 00 00 00 0c
-
-//5b 6f 62 6a 65 63 74 20 4f 62 6a 65
-// 63 74 5d

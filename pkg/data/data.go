@@ -17,11 +17,11 @@ const (
 )
 
 const (
-	O_2 Operation = 2 // heart beat
-	O_3 Operation = 3 // heart beat response (人气值)
-	O_5 Operation = 5 // broadcast
-	O_7 Operation = 7 // enter into the room
-	O_8 Operation = 8 // entrance reply
+	O_2 = Operation(2) // heart beat
+	O_3 = Operation(3) // heart beat response (人气值)
+	O_5 = Operation(5) // broadcast
+	O_7 = Operation(7) // enter into the room
+	O_8 = Operation(8) // entrance reply
 )
 
 var (
@@ -62,12 +62,12 @@ func (p *Package) Encode() []byte {
 	return buf.Bytes()
 }
 
-func (p *Package) DecodeHead(data []byte) error {
-	if len(data) < 16 {
+func (p *Package) DecodeHead(d []byte) error {
+	if len(d) < 16 {
 		return fmt.Errorf("invalid data length")
 	}
 
-	buf := bytes.NewReader(data)
+	buf := bytes.NewReader(d)
 	binary.Read(buf, binary.BigEndian, &p.PackageLength)
 	if p.PackageLength < 16 {
 		return fmt.Errorf("package length in data is less than 16")

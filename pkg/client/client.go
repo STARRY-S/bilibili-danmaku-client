@@ -3,16 +3,17 @@ package client
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
 	"encoding/binary"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"strings"
-	"time"
+	"os"
+	"os/signal"
+	"sync"
 
 	"github.com/STARRY-S/bilibili-danmaku-client/pkg/data"
 	"github.com/STARRY-S/bilibili-danmaku-client/utils"
+	"github.com/andybalholm/brotli"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/websocket"
 )
@@ -21,19 +22,23 @@ type Client struct {
 	roomID        int
 	ws            data.WsConnection
 	sendPackageCh chan *data.Package
+	readPackageCh chan *data.Package
 
-	OnMessage func(*data.Package) error
+	wg *sync.WaitGroup
 
-	exitCh chan struct{}
+	// Callback function when receive one websocket package
+	OnPackage func(*data.Package) error
 }
 
 func NewClient(rid int) *Client {
-	return &Client{
-		roomID: rid,
-
-		OnMessage: defaultOnMessage,
-		exitCh:    make(chan struct{}),
+	c := &Client{
+		roomID:        rid,
+		sendPackageCh: make(chan *data.Package),
+		readPackageCh: make(chan *data.Package),
+		wg:            &sync.WaitGroup{},
 	}
+	c.OnPackage = c.defaultOnPackage
+	return c
 }
 
 func (c *Client) Connect() error {
@@ -41,72 +46,85 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("invalid room ID [%d]", c.roomID)
 	}
 
-	var err error
-	c.ws, err = websocket.Dial(utils.DanmakuURL, "", utils.DanmakuOrigin)
+	err := c.buildWsConnection()
 	if err != nil {
 		return fmt.Errorf("Connect: %w", err)
 	}
 
-	// ==========================
-	// send first data
-	fd := data.GetFirstData(c.roomID)
-	if fd == nil {
-		return fmt.Errorf("Connect: failed to get first data")
-	}
-	logrus.Infof("fd: %v", string(fd))
-	pkg := data.NewPackage(fd, data.PV_1, data.O_7)
-	d := pkg.Encode()
-	n, err := c.ws.Write(d)
+	// prepare go routines
+	c.prepareRoutines()
+
+	// waiting all routine stop
+	c.wg.Wait()
+
+	logrus.Infof("Client stopped gracefully")
+
+	return nil
+}
+
+func (c *Client) buildWsConnection() error {
+	var err error
+	c.ws, err = websocket.Dial(utils.DanmakuURL, "", utils.DanmakuOrigin)
 	if err != nil {
 		return err
 	}
-	logrus.Infof("Send response: %v", n)
+	// send first data
+	d := data.GetFirstData(c.roomID)
+	if d == nil {
+		return fmt.Errorf("failed to get first data")
+	}
+	pkg := data.NewPackage(d, data.PV_1, data.O_7)
+
+	_, err = c.ws.Write(pkg.Encode())
+	if err != nil {
+		return err
+	}
 
 	// server connected
 	if c.ws.IsClientConn() {
 		logrus.Infof("Server connected")
 	}
 
-	// prepare go routines
-	c.onConnect()
-
-	// main routine blocks here
-	<-time.After(time.Minute * 30)
-	close(c.exitCh)
-
-	logrus.Warnf("!!!EXIT SIGNAL TRIGGERED!!!")
-	<-time.After(time.Second * 30)
-
 	return nil
 }
 
-func (c *Client) onConnect() {
-	go c.sendPackageRoutine()
-	go c.sendHeartBeatRoutine()
-	go c.readWsRoutine()
+func (c *Client) prepareRoutines() {
+	ctx, stop := context.WithCancel(context.Background())
+	go c.sendPackageRoutine(ctx)
+	go c.sendHeartBeatRoutine(ctx)
+	go c.readPackageRoutine(ctx)
+	c.wg.Add(3)
+	// do not wait readWsRoutine since it may in blocked status
+	go c.readWsRoutine(ctx)
+
+	// handle SIGINT gracefully
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	go func() {
+		for {
+			s := <-sig
+			logrus.Debugf("signal received: %v", s)
+			if s != os.Interrupt {
+				continue
+			}
+			stop()
+			// force exit if not stopped gracefully
+			<-sig
+			os.Exit(1)
+		}
+	}()
 }
 
 func (c *Client) sendData(d []byte, p data.Protocol, o data.Operation) error {
-	pkg := data.NewPackage(d, p, o)
-	c.sendPackageCh <- pkg
-
+	c.sendPackageCh <- data.NewPackage(d, p, o)
 	return nil
 }
 
-func (c *Client) handleMessage(msg string) {
-
-}
-
-func defaultOnMessage(pkg *data.Package) error {
-	msg := fmt.Sprintf("{PackageLength: %v, HeaderLength: %v, PV: %v, OP: %v}\n",
-		pkg.PackageLength, pkg.HeaderLength, pkg.ProtocolVersion,
-		pkg.Operation)
-	logrus.Debugf("defaultOnMessage %v", msg)
-
+func (c *Client) defaultOnPackage(pkg *data.Package) error {
 	switch pkg.ProtocolVersion {
 	case data.PV_0: // JSON plantext
-		// broadcast junk message, discard it
-		// logrus.Debugf("OnMessage: %v", string(pkg.Data))
+		// Can be broadcast junk message or decompressed danmaku message
+		c.handleMessage(pkg.Data)
 	case data.PV_1: // uncompressed data and popularity value
 		switch pkg.Operation {
 		case data.O_3: // 气人值
@@ -115,7 +133,7 @@ func defaultOnMessage(pkg *data.Package) error {
 			binary.Read(r, binary.BigEndian, &u)
 			logrus.Infof("气人值: %v", u)
 		case data.O_8: // 进房间成功
-			logrus.Infof("Response: %v", string(pkg.Data))
+			logrus.Debugf("Response: %v", string(pkg.Data))
 		}
 	case data.PV_2: // gzip compressed JSON
 		if pkg.Operation != 5 {
@@ -124,39 +142,41 @@ func defaultOnMessage(pkg *data.Package) error {
 		}
 		zr, err := zlib.NewReader(bytes.NewReader(pkg.Data))
 		if err != nil {
-			return fmt.Errorf("defaultOnMessage: gzip.NewReader: %w", err)
+			return fmt.Errorf("defaultOnPackage: %w", err)
 		}
-		data, err := io.ReadAll(zr)
-		if err != nil && errors.Is(err, io.EOF) {
-			return nil
-		} else if err != nil {
-			return fmt.Errorf("defaultOnMessage: io.ReadAll: %w", err)
-		}
-		// danmaku data
-		// TODO: EXPERIMENTAL
-		str := string(data)
-		start := strings.Index(str, "{")
-		end := strings.LastIndex(str, "}")
-		str = str[start : end+1]
-		str = strings.Replace(str, ">", "", -1)
-		fmt.Printf("XXXX %v\n", str)
-
-		var obj interface{}
-		d := json.NewDecoder(bytes.NewBufferString(str))
-		err = d.Decode(&obj)
+		d, err := io.ReadAll(zr)
 		if err != nil {
-			logrus.Error(err)
+			return fmt.Errorf("defaultOnPackage: %w", err)
 		}
-		// logrus.Infof("XXXXXX: %++v", obj)
-
-		out, err := json.MarshalIndent(obj, "", "  ")
-		if err != nil {
-			logrus.Error(err)
-		}
-		logrus.Infof("XXXX %v", string(out))
-
+		c.handleDecompressedPackage(d)
 	case data.PV_3: // brotli compressed data
-		logrus.Infof("unsupported bortli compressed data")
+		logrus.Debugf("unsupported bortli compressed data")
+		br := brotli.NewReader(bytes.NewReader(pkg.Data))
+		d, err := io.ReadAll(br)
+		if err != nil {
+			return fmt.Errorf("defaultOnPackage: %w", err)
+		}
+		c.handleDecompressedPackage(d)
+	}
+
+	return nil
+}
+
+func (c *Client) handleDecompressedPackage(d []byte) error {
+	pkg := &data.Package{}
+	err := pkg.DecodeHead(d)
+	if err != nil {
+		return fmt.Errorf("handleDecompressedMessage: %w", err)
+	}
+
+	pkg.Data = make([]byte, pkg.PackageLength-data.PkgHeaderLen)
+	copy(pkg.Data, d[data.PkgHeaderLen:pkg.PackageLength+1])
+
+	c.OnPackage(pkg)
+
+	// use recursion to handle multiple decompressed package
+	if len(d) > int(pkg.PackageLength) {
+		return c.handleDecompressedPackage(d[pkg.PackageLength:])
 	}
 
 	return nil

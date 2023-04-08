@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"io"
 	"time"
@@ -9,8 +10,12 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func (c *Client) sendPackageRoutine() {
-	c.sendPackageCh = make(chan *data.Package)
+const (
+	bufferLength = 1024
+)
+
+func (c *Client) sendPackageRoutine(ctx context.Context) {
+	defer c.wg.Done()
 	for {
 		select {
 		case pkg := <-c.sendPackageCh:
@@ -20,37 +25,51 @@ func (c *Client) sendPackageRoutine() {
 				logrus.Error(err)
 			}
 			logrus.Debugf("Sent package length: %v", n)
-		case <-c.exitCh:
-			logrus.Debug("Send package routine exited gracefully.")
+		case <-ctx.Done():
+			close(c.sendPackageCh)
+			logrus.Debug("sendPackageRoutine exited gracefully")
 			return
 		}
 	}
 }
 
-func (c *Client) sendHeartBeatRoutine() {
-	// send heartbeat package first
-	err := c.sendData(data.HeartBeatData, data.PV_1, data.O_2)
-	if err != nil {
-		logrus.Error(err)
-	}
+func (c *Client) sendHeartBeatRoutine(ctx context.Context) {
+	defer c.wg.Done()
 	for {
 		select {
 		case <-time.After(time.Second * 30):
 			// send heartbeat package every 30 seconds
-			err = c.sendData(data.HeartBeatData, data.PV_1, data.O_2)
+			err := c.sendData(data.HeartBeatData, data.PV_1, data.O_2)
 			if err != nil {
 				logrus.Error(err)
 			}
-		case <-c.exitCh:
-			logrus.Debugf("heartbeat routine exited gracefully")
+		case <-ctx.Done():
+			logrus.Debugf("sendHeartBeatRoutine exited gracefully")
 			return
 		}
 	}
 }
 
-func (c *Client) readWsRoutine() {
-	// read message loop
+func (c *Client) readPackageRoutine(ctx context.Context) {
+	defer c.wg.Done()
 	for {
+		select {
+		case pkg := <-c.readPackageCh:
+			// OnPackage callback to handle package
+			if err := c.OnPackage(pkg); err != nil {
+				logrus.Error(err)
+			}
+		case <-ctx.Done():
+			logrus.Debugf("readPackageRoutine exited gracefully")
+			return
+		}
+	}
+}
+
+func (c *Client) readWsRoutine(ctx context.Context) {
+	for {
+		// This routine does not need to exit gracefully since it
+		// will block here if no message read from ws connection
 		pkg, err := c.readWsPackage()
 		if err != nil {
 			logrus.Error(err)
@@ -58,23 +77,18 @@ func (c *Client) readWsRoutine() {
 		if pkg == nil {
 			continue
 		}
-		// OnMessage callback to handle package
-		if err := c.OnMessage(pkg); err != nil {
-			logrus.Error(err)
-		}
 
+		c.readPackageCh <- pkg
 		select {
-		case <-c.exitCh:
-			logrus.Debugf("readWsRoutine exited gracefully")
+		case <-ctx.Done():
 			return
-		default:
+		case <-time.After(time.Millisecond * 100):
 		}
 	}
 }
 
 func (c *Client) readWsPackage() (*data.Package, error) {
-	buffLen := 64
-	buff := make([]byte, buffLen)
+	buff := make([]byte, bufferLength)
 	n, err := c.ws.Read(buff)
 	if err != nil && errors.Is(err, io.EOF) {
 		// websocket connection closed
