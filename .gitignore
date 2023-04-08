@@ -1,0 +1,27 @@
+# Compiled binary file
+bilibili-danmaku-client
+
+# go test coverage
+*.out
+
+# vscode config
+.vscode
+
+# other data
+test.txt
+
+# macOS
+.DS_Store
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Go workspace file
+go.work
