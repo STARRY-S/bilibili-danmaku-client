@@ -1,0 +1,27 @@
+name: Go
+
+on: [ push, pull_request ]
+
+env:
+  RUNNING_IN_CI: "true"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: [ '1.20' ]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev
+      - name: Unit test
+        run: go test ./...
+      - name: Build test
+        run: ./scripts/build.sh

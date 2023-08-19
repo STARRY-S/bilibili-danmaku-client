@@ -2,6 +2,7 @@ package voice
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,9 @@ func init() {
 }
 
 func Test_Say(t *testing.T) {
+	if os.Getenv("RUNNING_IN_CI") != "" {
+		t.Skip()
+	}
 	s := NewVoice("12345")
 	err := s.Say()
 	if err != nil {
