@@ -21,7 +21,9 @@ func (c *Client) handleMessage(d []byte) {
 			break
 		}
 		logrus.Debugf("Danmaku uid: %v", dmk.GetUID())
-		logrus.Infof("用户 %q 说: %q", dmk.GetUsername(), dmk.GetContent())
+		s := fmt.Sprintf("%q 说: %q", dmk.GetUsername(), dmk.GetContent())
+		logrus.Infof(s)
+		c.voiceStringCh <- s
 	case data.DMK_INTERACT_WORD:
 		msg, err := data.NewInteractWordData(d)
 		if err != nil {
@@ -29,7 +31,9 @@ func (c *Client) handleMessage(d []byte) {
 			break
 		}
 		logrus.Debugf("Interact word uid %v", msg.Data.UID)
-		logrus.Infof("欢迎用户 %q 进入直播间", msg.Data.Uname)
+		s := fmt.Sprintf("欢迎 %q 进入直播间", msg.Data.Uname)
+		logrus.Infof(s)
+		c.voiceStringCh <- s
 	case data.DMK_ONLINE_RANK_COUNT:
 		msg, err := data.NewOnlineRankCountData(d)
 		if err != nil {
@@ -76,8 +80,10 @@ func (c *Client) handleMessage(d []byte) {
 			logrus.Errorf("handleMessage: DMK_SEND_GIFT: %v", err)
 			break
 		}
-		logrus.Infof("感谢 %q 赠送的 %d 个%s",
+		s := fmt.Sprintf("感谢 %q 赠送的 %d 个%s",
 			msg.Data.Uname, msg.Data.Num, msg.Data.GiftName)
+		logrus.Infof(s)
+		c.voiceStringCh <- s
 	case data.DMK_STOP_LIVE_ROOM_LIST:
 	case data.DMK_NOTICE_MSG:
 	default:

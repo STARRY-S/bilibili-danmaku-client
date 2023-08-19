@@ -18,6 +18,7 @@ type Client struct {
 	ws            data.WsConnection
 	sendPackageCh chan *data.Package
 	readPackageCh chan *data.Package
+	voiceStringCh chan string
 	errorCh       chan error
 
 	wg *sync.WaitGroup
@@ -37,6 +38,7 @@ func NewClient(rid int) *Client {
 		roomID:        rid,
 		sendPackageCh: make(chan *data.Package),
 		readPackageCh: make(chan *data.Package),
+		voiceStringCh: make(chan string),
 		errorCh:       make(chan error),
 		mutex:         new(sync.RWMutex),
 		wg:            new(sync.WaitGroup),
@@ -67,8 +69,9 @@ func (c *Client) GetRankList() {
 
 func (c *Client) defaultOnPackage(pkg *data.Package) error {
 	dataLength := int(pkg.PackageLength - uint32(pkg.HeaderLength))
-	if len(pkg.Data) != dataLength {
-		logrus.Debugf("WARN: data length: %d, should be %d",
+	if len(pkg.Data) != dataLength && len(pkg.Data) != 19 {
+		// heart beat respond package length is 19 (actual 4), ignore it
+		logrus.Debugf("Warning: data length: %d, should be %d",
 			len(pkg.Data), dataLength)
 	}
 	switch pkg.ProtocolVersion {

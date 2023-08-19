@@ -27,7 +27,7 @@ type clientCmd struct {
 func newClientCmd() *clientCmd {
 	cc := &clientCmd{}
 	cc.baseCmd.cmd = &cobra.Command{
-		Use:   "client",
+		Use:   "bilibili-danmaku-client",
 		Short: "Bilibili Danmaku Client Go",
 		Long:  "Bilibili Danmaku Client Go",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -51,9 +51,12 @@ func newClientCmd() *clientCmd {
 	}
 	cc.cmd.Version = getVersion()
 	cc.cmd.SilenceUsage = true
-	cc.cmd.PersistentFlags().Bool("debug", false, "debug mode")
+	cc.cmd.PersistentFlags().Bool("debug", false, "Debug mode")
 
-	cc.cmd.Flags().IntP("roomID", "r", 0, "room id")
+	cc.cmd.Flags().Bool("voice", true, "Enable voice output")
+	cc.cmd.Flags().String("voiceAPI", "sougou", "Voice API (available: sougou)")
+	cc.cmd.Flags().IntP("roomID", "r", 0, "直播间 ID (Room ID)")
+	cc.cmd.Flags().IntP("uid", "u", 0, "正在观看的用户名 ID (User ID)")
 
 	return cc
 }
@@ -66,6 +69,19 @@ func (cc clientCmd) setupFlags() error {
 	}
 	if config.GetInt("roomID") < 0 {
 		return fmt.Errorf("invalid room ID")
+	}
+	if config.GetInt("uid") == 0 {
+		logrus.Warnf("UID is not provided, some function may not working properly")
+	}
+	if config.GetInt("uid") < 0 {
+		return fmt.Errorf("invalid uid")
+	}
+	if config.GetBool("voice") {
+		logrus.Infof("Voice output enabled")
+		switch config.GetString("voiceAPI") {
+		case "sougou":
+			logrus.Debugf("Voice API set to sougou")
+		}
 	}
 
 	return nil

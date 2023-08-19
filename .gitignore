@@ -1,5 +1,5 @@
 # Compiled binary file
-bilibili-danmaku-client
+bilibili-danmaku-client*
 
 # go test coverage
 *.out

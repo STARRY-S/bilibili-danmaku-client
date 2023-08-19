@@ -9,7 +9,9 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/STARRY-S/bilibili-danmaku-client/pkg/config"
 	"github.com/STARRY-S/bilibili-danmaku-client/pkg/data"
+	"github.com/STARRY-S/bilibili-danmaku-client/pkg/voice"
 	"github.com/STARRY-S/bilibili-danmaku-client/utils"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/websocket"
@@ -70,8 +72,10 @@ func (c *Client) prepareRoutines() {
 	go c.sendPackageRoutine(ctx)
 	go c.sendHeartBeatRoutine(ctx)
 	go c.readPackageRoutine(ctx)
+	go c.handleAudioRoutine(ctx)
 	go c.handleErrorRoutine(ctx)
-	c.wg.Add(4)
+
+	c.wg.Add(5)
 	// do not wait readWsRoutine since it may in blocked status
 	go c.readWsRoutine(ctx)
 
@@ -209,6 +213,26 @@ func (c *Client) readWsPackage() (*data.Package, error) {
 	return pkg, nil
 }
 
+func (c *Client) handleAudioRoutine(ctx context.Context) {
+	defer c.wg.Done()
+	for {
+		select {
+		case str := <-c.voiceStringCh:
+			go func() {
+				if !config.GetBool("voice") {
+					return
+				}
+				if err := voice.NewVoice(str).Say(); err != nil {
+					c.errorCh <- err
+				}
+			}()
+		case <-ctx.Done():
+			logrus.Debugf("handleAudioRoutine exited gracefully")
+			return
+		}
+	}
+}
+
 func (c *Client) handleErrorRoutine(ctx context.Context) {
 	defer c.wg.Done()
 	for {
@@ -216,6 +240,7 @@ func (c *Client) handleErrorRoutine(ctx context.Context) {
 		case e := <-c.errorCh:
 			logrus.Error(e)
 		case <-ctx.Done():
+			logrus.Debugf("handleErrorRoutine exited gracefully")
 			return
 		}
 	}

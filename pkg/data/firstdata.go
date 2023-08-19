@@ -3,6 +3,7 @@ package data
 import (
 	"encoding/json"
 
+	"github.com/STARRY-S/bilibili-danmaku-client/pkg/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -17,7 +18,7 @@ type firstData struct {
 
 func GetFirstData(roomID int) []byte {
 	p := &firstData{
-		Uid:      0,
+		Uid:      config.GetInt("uid"),
 		Roomid:   roomID,
 		Protover: 3,
 		Platform: "web",
