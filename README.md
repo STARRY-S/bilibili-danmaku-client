@@ -1,6 +1,6 @@
 # bilibili-danmaku-client
 
-A simple bilibili danmaku client written in Go.
+A simple [Bilibili](https://bilibili.com) danmaku CLI (for [Bilibili Live](https://live.bilibili.com)) written in Go.
 
 ## License
 
