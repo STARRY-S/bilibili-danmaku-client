@@ -2,6 +2,25 @@
 
 A simple [Bilibili](https://bilibili.com) danmaku CLI (for [Bilibili Live](https://live.bilibili.com)) written in Go.
 
+## Usage
+
+Ensure Go 1.20+ installed.
+
+```console
+$ git clone https://github.com/STARRY-S/bilibili-danmaku-client.git && cd bilibili-danmaku-client
+$ go build -o bilibili-danmaku-client .
+
+$ ./bilibili-danmaku-client -h
+Bilibili Danmaku Client Go
+......
+
+$ ./bilibili-danmaku-client -r [ROOM ID] -u [USER ID] --voice
+INFO[0000] Voice output enabled
+INFO[0000] Server connected
+INFO[0000] 气人值: 1
+......
+```
+
 ## License
 
 ```
